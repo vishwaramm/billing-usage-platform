@@ -45,15 +45,21 @@ public class InvoicingService {
     public List<UUID> runForPeriod(LocalDate periodStart, LocalDate periodEnd) {
         UUID tenantId = TenantContext.getRequired();
 
-        InvoiceRun invoiceRun = new InvoiceRun();
-        invoiceRun.setTenantId(tenantId);
-        invoiceRun.setPeriodStart(periodStart);
-        invoiceRun.setPeriodEnd(periodEnd);
+        Optional<InvoiceRun> existingRun = invoiceRunRepository.findByTenantIdAndPeriodStartAndPeriodEnd(tenantId,
+                periodStart, periodEnd);
 
-        try {
-            invoiceRunRepository.saveAndFlush(invoiceRun);
-        } catch (DataIntegrityViolationException ex) {
-            return List.of();
+        if (existingRun.isPresent()) {
+            InvoiceRun run = existingRun.get();
+            if (run.getStatus() == InvoiceRun.Status.COMPLETED) {
+                return List.of();
+            }
+        } else {
+            InvoiceRun run = new InvoiceRun();
+            run.setTenantId(tenantId);
+            run.setPeriodStart(periodStart);
+            run.setPeriodEnd(periodEnd);
+            run.setStatus(InvoiceRun.Status.STARTED);
+            invoiceRunRepository.saveAndFlush(run);
         }
 
         List<Subscription> subscriptions = subscriptionRepository.findByTenantIdAndStatus(
@@ -160,6 +166,14 @@ public class InvoicingService {
 
             createdInvoiceId.add(invoice.getId());
         }
+
+        invoiceRunRepository.findByTenantIdAndPeriodStartAndPeriodEnd(tenantId,
+                periodStart, periodEnd)
+                .ifPresent(r -> {
+                    r.setStatus(InvoiceRun.Status.COMPLETED);
+                    r.setCompleted_at(Instant.now());
+                    invoiceRunRepository.save(r);
+                });
 
         return createdInvoiceId;
     }
